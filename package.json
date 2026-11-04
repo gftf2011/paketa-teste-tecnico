@@ -4,8 +4,12 @@
   "description": "API de gestão de menus com aninhamento infinito",
   "scripts": {
     "dev": "tsx watch src/main/server.ts",
+    "dev:docker": "docker compose up -d --wait mongo && npm run dev",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main/server.js",
+    "docker:up": "docker compose up -d --build --wait",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f api",
     "typecheck": "tsc --noEmit",
     "test": "jest"
   },
