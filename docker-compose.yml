@@ -29,5 +29,17 @@ services:
       retries: 10
       start_period: 10s
 
+  # Teste de carga (k6). Só sobe quando chamado: npm run load:<tipo>
+  k6:
+    image: grafana/k6:1.3.0
+    profiles: [load]
+    environment:
+      BASE_URL: http://api:3000
+    volumes:
+      - ./load-tests:/scripts:ro
+    depends_on:
+      api:
+        condition: service_healthy
+
 volumes:
   mongo-data:

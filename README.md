@@ -55,6 +55,39 @@ npm run typecheck
 
 Os testes do repositório MongoDB usam o [mongodb-memory-server](https://github.com/typegoose/mongodb-memory-server), que baixa o binário do MongoDB na primeira execução. Não é preciso ter um banco rodando.
 
+### Testes de carga (k6)
+
+O script [load-tests/menu.test.js](load-tests/menu.test.js) roda com o [k6](https://k6.io) dentro do Docker Compose, então não é preciso instalá-lo. Cada comando sobe a API e o MongoDB, se ainda não estiverem rodando, e executa o teste:
+
+```bash
+npm run load:smoke
+npm run load:load
+npm run load:stress
+npm run load:spike
+```
+
+| Perfil | Leituras (GET) | Escritas | Duração | Objetivo |
+|---|---|---|---|---|
+| `smoke` | 10 req/s | 1 ciclo/s | 30 s | Sanidade: tudo responde corretamente |
+| `load` | Rampa até 500 req/s, sustentada por 2 min | 5 ciclos/s | ~3 min | Carga esperada em produção |
+| `stress` | Rampa até 3000 req/s | 10 ciclos/s | ~3 min | Achar o limite |
+| `spike` | De 50 para 3000 req/s em 10 s | 2 ciclos/s | 1,5 min | Pico repentino de acessos |
+
+Como o teste funciona:
+- **Preparação:** o `setup` popula o menu com 500 itens em árvore. Para mudar a quantidade, rode o k6 com `-e SEED_ITEMS=<n>`.
+- **Leitores:** metade das leituras reenvia o último ETag recebido, simulando um navegador com o menu em cache.
+- **Escritores:** cada ciclo cria um item raiz e um filho, tenta criar o filho de novo (e espera 409) e exclui a raiz em cascata (e espera `deletedCount: 2`).
+- **Limpeza:** o `teardown` remove tudo o que o teste criou.
+- **Critérios de aprovação:** menos de 1% de falhas, mais de 99% de checks aprovados e p95 abaixo do limite de cada perfil.
+
+As leituras usam taxa de chegada constante (*arrival rate*): a carga não diminui quando a API fica lenta, como acontece com usuários reais.
+
+Com o k6 instalado localmente e a API rodando, também dá para executar direto:
+
+```bash
+k6 run -e TEST_TYPE=load load-tests/menu.test.js
+```
+
 ### Variáveis de ambiente
 
 | Variável | Padrão | Descrição |
@@ -230,6 +263,21 @@ Medição local do `GET /api/v1/menu` com 712 itens e 100 requisições simultâ
 | 304 Not Modified | 1.778 req/s | 7.284 req/s |
 
 Todas as consultas usam índice, conferido com `explain`: `IXSCAN` no `_id` e em `ancestors`, e `IDHACK` na busca do pai.
+
+### Resultados do k6
+
+A stack rodou no Docker Desktop (VM com 8 CPUs e 4 GB), com uma única instância da API e o k6 na mesma máquina. O menu tinha 500 itens.
+
+| Perfil | Requisições | Falhas | p95 leitura | p99 leitura | p95 escrita |
+|---|---|---|---|---|---|
+| `smoke` | 935 | 0% | 11,9 ms | 14,5 ms | 7,6 ms |
+| `load` (500 req/s) | 74.960 | 0% | 3,9 ms | 11,3 ms | 5,6 ms |
+| `stress` (até 3000 req/s) | 282.228 | 0% | 4,5 ms | 23,4 ms | 5,0 ms |
+| `spike` (50 → 3000 req/s) | 123.734 | 0% | 1,2 ms | 4,2 ms | 4,7 ms |
+
+- **O gargalo foi o gerador de carga.** Numa amostra durante a rampa do `stress`, por volta de 2500 req/s, a API usava 28% de CPU e o MongoDB 5%, enquanto o k6 consumia 151%. Ou seja, uma única instância tem bastante folga nessa faixa.
+- **O banco quase não trabalha.** Mesmo com escritas contínuas, que limpam o cache a cada operação, a maioria das leituras sai da memória.
+- **A maioria das revalidações responde 304** (de 87% a 98%). O ETag é um hash do conteúdo, e cada ciclo de escrita cria e exclui seus itens, devolvendo o menu ao mesmo conteúdo e, portanto, ao mesmo ETag.
 
 ### Várias instâncias
 

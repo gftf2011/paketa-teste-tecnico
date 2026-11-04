@@ -11,7 +11,11 @@
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f api",
     "typecheck": "tsc --noEmit",
-    "test": "jest"
+    "test": "jest",
+    "load:smoke": "docker compose run --rm k6 run -e TEST_TYPE=smoke /scripts/menu.test.js",
+    "load:load": "docker compose run --rm k6 run -e TEST_TYPE=load /scripts/menu.test.js",
+    "load:stress": "docker compose run --rm k6 run -e TEST_TYPE=stress /scripts/menu.test.js",
+    "load:spike": "docker compose run --rm k6 run -e TEST_TYPE=spike /scripts/menu.test.js"
   },
   "repository": {
     "type": "git",
