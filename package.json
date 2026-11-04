@@ -1,0 +1,35 @@
+{
+  "name": "paketa-teste-tecnico",
+  "version": "1.0.0",
+  "description": "API de gestão de menus com aninhamento infinito",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gftf2011/paketa-teste-tecnico.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/gftf2011/paketa-teste-tecnico/issues"
+  },
+  "homepage": "https://github.com/gftf2011/paketa-teste-tecnico#readme",
+  "dependencies": {
+    "uuid": "^11.1.1"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^24.19.2",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.4.15",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
