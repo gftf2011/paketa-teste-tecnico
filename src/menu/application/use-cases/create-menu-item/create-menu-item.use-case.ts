@@ -1,9 +1,4 @@
-import {
-  MenuItem,
-  MenuItemNameAlreadyInUseError,
-  MenuItemRepository,
-  ParentMenuItemNotFoundError,
-} from '../../../domain';
+import { MenuItem, MenuItemRepository } from '../../../domain';
 import { UseCase } from '../../../../shared/application/use-case';
 
 export interface CreateMenuItemInput {
@@ -15,21 +10,16 @@ export interface CreateMenuItemOutput {
   id: string;
 }
 
+/**
+ * Cria um item de menu. A existência do pai e a unicidade do nome são
+ * garantidas pelo repositório na própria escrita: assim a criação custa
+ * uma única ida ao banco e continua correta sob requisições simultâneas.
+ */
 export class CreateMenuItemUseCase implements UseCase<CreateMenuItemInput, CreateMenuItemOutput> {
   constructor(private readonly menuItemRepository: MenuItemRepository) {}
 
   async execute(input: CreateMenuItemInput): Promise<CreateMenuItemOutput> {
     const item = MenuItem.create({ name: input.name, parentId: input.relatedId });
-
-    if (item.parentId && !(await this.menuItemRepository.findById(item.parentId))) {
-      throw new ParentMenuItemNotFoundError(item.parentId.value);
-    }
-
-    // Verificação antecipada para uma resposta clara; o repositório ainda
-    // garante a unicidade em caso de criações simultâneas.
-    if (await this.menuItemRepository.existsByName(item.name)) {
-      throw new MenuItemNameAlreadyInUseError(item.name.value);
-    }
 
     await this.menuItemRepository.create(item);
 

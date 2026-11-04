@@ -52,15 +52,6 @@ describe('CreateMenuItemUseCase', () => {
     expect(await repository.findAll()).toHaveLength(1);
   });
 
-  it('propaga o conflito de nome detectado pelo repositório em criações simultâneas', async () => {
-    await sut.execute({ name: 'Informática' });
-    jest.spyOn(repository, 'existsByName').mockResolvedValueOnce(false);
-
-    await expect(sut.execute({ name: 'Informática' })).rejects.toThrow(
-      MenuItemNameAlreadyInUseError,
-    );
-  });
-
   it('falha com nome inválido', async () => {
     await expect(sut.execute({ name: '' })).rejects.toThrow(InvalidMenuItemNameError);
   });

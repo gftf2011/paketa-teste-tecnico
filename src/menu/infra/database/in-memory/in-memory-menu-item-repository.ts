@@ -1,9 +1,9 @@
 import {
   MenuItem,
   MenuItemId,
-  MenuItemName,
   MenuItemNameAlreadyInUseError,
   MenuItemRepository,
+  ParentMenuItemNotFoundError,
 } from '../../../domain';
 
 interface MenuItemRecord {
@@ -19,9 +19,13 @@ interface MenuItemRecord {
  */
 export class InMemoryMenuItemRepository implements MenuItemRepository {
   private readonly records = new Map<string, MenuItemRecord>();
+  private readonly names = new Set<string>();
 
   async create(item: MenuItem): Promise<void> {
-    if (await this.existsByName(item.name)) {
+    if (item.parentId && !this.records.has(item.parentId.value)) {
+      throw new ParentMenuItemNotFoundError(item.parentId.value);
+    }
+    if (this.names.has(item.name.value)) {
       throw new MenuItemNameAlreadyInUseError(item.name.value);
     }
     this.records.set(item.id.value, {
@@ -29,6 +33,7 @@ export class InMemoryMenuItemRepository implements MenuItemRepository {
       name: item.name.value,
       parentId: item.parentId?.value ?? null,
     });
+    this.names.add(item.name.value);
   }
 
   async findById(id: MenuItemId): Promise<MenuItem | null> {
@@ -36,12 +41,10 @@ export class InMemoryMenuItemRepository implements MenuItemRepository {
     return record ? MenuItem.restore(record) : null;
   }
 
-  async existsByName(name: MenuItemName): Promise<boolean> {
-    return [...this.records.values()].some((record) => record.name === name.value);
-  }
-
   async findAll(): Promise<MenuItem[]> {
-    return [...this.records.values()].map((record) => MenuItem.restore(record));
+    return [...this.records.values()]
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      .map((record) => MenuItem.restore(record));
   }
 
   async deleteWithDescendants(id: MenuItemId): Promise<number> {
@@ -60,7 +63,10 @@ export class InMemoryMenuItemRepository implements MenuItemRepository {
       toDelete.push(...(childrenByParent.get(toDelete[i]!) ?? []));
     }
 
-    for (const recordId of toDelete) this.records.delete(recordId);
+    for (const recordId of toDelete) {
+      this.names.delete(this.records.get(recordId)!.name);
+      this.records.delete(recordId);
+    }
     return toDelete.length;
   }
 }
