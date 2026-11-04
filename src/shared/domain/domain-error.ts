@@ -11,3 +11,12 @@ export abstract class DomainError extends Error {
     this.name = new.target.name;
   }
 }
+
+/** Dados de entrada que violam uma regra do domínio. */
+export abstract class ValidationError extends DomainError {}
+
+/** Recurso referenciado que não existe. */
+export abstract class NotFoundError extends DomainError {}
+
+/** Operação que conflita com o estado atual (ex.: unicidade). */
+export abstract class ConflictError extends DomainError {}

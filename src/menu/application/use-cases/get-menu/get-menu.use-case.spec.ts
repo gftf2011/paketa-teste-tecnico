@@ -31,3 +31,26 @@ describe('GetMenuUseCase', () => {
     ]);
   });
 });
+
+describe('GetMenuUseCase (memorização)', () => {
+  it('reaproveita a árvore quando o repositório devolve a mesma lista', async () => {
+    const repository = new InMemoryMenuItemRepository();
+    await repository.create(MenuItem.create({ name: 'Informática' }));
+    const items = await repository.findAll();
+    jest.spyOn(repository, 'findAll').mockResolvedValue(items);
+    const sut = new GetMenuUseCase(repository);
+
+    expect(await sut.execute()).toBe(await sut.execute());
+  });
+
+  it('remonta a árvore quando o repositório devolve uma lista nova', async () => {
+    const repository = new InMemoryMenuItemRepository();
+    const sut = new GetMenuUseCase(repository);
+
+    const before = await sut.execute();
+    await repository.create(MenuItem.create({ name: 'Informática' }));
+
+    expect(await sut.execute()).not.toBe(before);
+    expect(await sut.execute()).toHaveLength(1);
+  });
+});

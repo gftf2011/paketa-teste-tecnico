@@ -1,6 +1,6 @@
-import { DomainError } from '../../../shared/domain/domain-error';
+import { ConflictError, NotFoundError, ValidationError } from '../../../shared/domain/domain-error';
 
-export class InvalidMenuItemIdError extends DomainError {
+export class InvalidMenuItemIdError extends ValidationError {
   readonly code = 'INVALID_MENU_ITEM_ID';
 
   constructor(value: unknown) {
@@ -8,11 +8,11 @@ export class InvalidMenuItemIdError extends DomainError {
   }
 }
 
-export class InvalidMenuItemNameError extends DomainError {
+export class InvalidMenuItemNameError extends ValidationError {
   readonly code = 'INVALID_MENU_ITEM_NAME';
 }
 
-export class MenuItemNameAlreadyInUseError extends DomainError {
+export class MenuItemNameAlreadyInUseError extends ConflictError {
   readonly code = 'MENU_ITEM_NAME_ALREADY_IN_USE';
 
   constructor(name: string) {
@@ -20,7 +20,7 @@ export class MenuItemNameAlreadyInUseError extends DomainError {
   }
 }
 
-export class MenuItemNotFoundError extends DomainError {
+export class MenuItemNotFoundError extends NotFoundError {
   readonly code = 'MENU_ITEM_NOT_FOUND';
 
   constructor(id: string) {
@@ -28,7 +28,7 @@ export class MenuItemNotFoundError extends DomainError {
   }
 }
 
-export class ParentMenuItemNotFoundError extends DomainError {
+export class ParentMenuItemNotFoundError extends NotFoundError {
   readonly code = 'PARENT_MENU_ITEM_NOT_FOUND';
 
   constructor(id: string) {
