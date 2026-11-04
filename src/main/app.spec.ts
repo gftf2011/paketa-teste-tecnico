@@ -2,6 +2,7 @@ import request from 'supertest';
 import { Express } from 'express';
 import { MenuItemId } from '../menu/domain';
 import { InMemoryMenuItemRepository } from '../menu/infra/database/in-memory/in-memory-menu-item-repository';
+import { createTestMeter } from '../shared/infra/observability/test-meter.test-helper';
 import { createApp } from './app';
 
 describe('API /api/v1/menu', () => {
@@ -240,5 +241,29 @@ describe('API /api/v1/menu', () => {
 
   it('expõe /health', async () => {
     await request(app).get('/health').expect(200, { status: 'ok' });
+  });
+
+  describe('métricas', () => {
+    it('conta itens criados, excluídos em cascata e erros por código', async () => {
+      const { meter, sum } = createTestMeter();
+      app = createApp({ menuItemRepository: new InMemoryMenuItemRepository(), meter });
+
+      const root = await createItem('Eletrodomésticos');
+      await createItem('Televisores', root);
+      await request(app).post('/api/v1/menu').send({ name: 'Televisores' }).expect(409);
+      await request(app).post('/api/v1/menu').send({ name: '' }).expect(400);
+      await request(app).delete(`/api/v1/menu/${root}`).expect(200);
+
+      expect(await sum('menu.items.created')).toBe(2);
+      expect(await sum('menu.items.deleted')).toBe(2);
+      expect(
+        await sum('app.errors', {
+          'app.error.code': 'MENU_ITEM_NAME_ALREADY_IN_USE',
+          'http.response.status_code': 409,
+        }),
+      ).toBe(1);
+      expect(await sum('app.errors', { 'app.error.code': 'INVALID_MENU_ITEM_NAME' })).toBe(1);
+      expect(await sum('app.errors')).toBe(2);
+    });
   });
 });

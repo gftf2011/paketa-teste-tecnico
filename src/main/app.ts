@@ -1,3 +1,4 @@
+import { Meter, metrics } from '@opentelemetry/api';
 import compression from 'compression';
 import express, { Express } from 'express';
 import {
@@ -7,14 +8,22 @@ import {
 } from '../menu/application';
 import { MenuItemRepository } from '../menu/domain';
 import { createMenuRouter } from '../menu/infra/http/menu-router';
-import { errorHandler, routeNotFoundHandler } from '../shared/infra/http/error-handler';
+import { MenuMetrics } from '../menu/infra/observability/menu-metrics';
+import { createErrorHandler, routeNotFoundHandler } from '../shared/infra/http/error-handler';
 
 export interface AppDependencies {
   menuItemRepository: MenuItemRepository;
+  /** Meter usado nas métricas da aplicação; padrão: o global do OpenTelemetry. */
+  meter?: Meter;
+  menuMetrics?: MenuMetrics;
 }
 
 /** Monta a aplicação HTTP. Não abre portas nem conexões, o que facilita os testes. */
-export function createApp({ menuItemRepository }: AppDependencies): Express {
+export function createApp({
+  menuItemRepository,
+  meter = metrics.getMeter('menu-api'),
+  menuMetrics = new MenuMetrics(meter),
+}: AppDependencies): Express {
   const app = express();
 
   app.disable('x-powered-by');
@@ -31,11 +40,12 @@ export function createApp({ menuItemRepository }: AppDependencies): Express {
       createMenuItem: new CreateMenuItemUseCase(menuItemRepository),
       deleteMenuItem: new DeleteMenuItemUseCase(menuItemRepository),
       getMenu: new GetMenuUseCase(menuItemRepository),
+      metrics: menuMetrics,
     }),
   );
 
   app.use(routeNotFoundHandler);
-  app.use(errorHandler);
+  app.use(createErrorHandler(meter));
 
   return app;
 }

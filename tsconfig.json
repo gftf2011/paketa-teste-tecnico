@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "commonjs",
+    "module": "node16",
     "lib": [
       "ES2022"
     ],
@@ -16,7 +16,9 @@
     "types": [
       "node",
       "jest"
-    ]
+    ],
+    "moduleResolution": "node16",
+    "isolatedModules": true
   },
   "include": [
     "src"

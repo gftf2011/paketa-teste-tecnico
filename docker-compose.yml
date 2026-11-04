@@ -9,6 +9,13 @@ services:
       MONGO_DB_NAME: menu
       MONGO_MAX_POOL_SIZE: 50
       MENU_CACHE_TTL_MS: 5000
+      # OpenTelemetry: envia para o serviço lgtm quando ele estiver rodando
+      # (npm run up). Sem ele, as exportações falham em
+      # silêncio e a API segue normal.
+      OTEL_SERVICE_NAME: menu-api
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://lgtm:4318
+      OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-0.1}
+      OTEL_METRIC_EXPORT_INTERVAL: 10000
     ports:
       - "${API_PORT:-3000}:3000"
     depends_on:
@@ -28,6 +35,17 @@ services:
       timeout: 3s
       retries: 10
       start_period: 10s
+
+  # Observabilidade: OTel Collector + Prometheus + Tempo + Loki + Grafana.
+  # Só sobe com o profile "observability" (imagem de ~3,5 GB).
+  lgtm:
+    image: grafana/otel-lgtm:0.36.0
+    profiles: [observability]
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    volumes:
+      - ./observability/grafana/menu-api-dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/menu-api.yaml:ro
+      - ./observability/grafana/dashboards:/otel-lgtm/dashboards/menu-api:ro
 
   # Teste de carga (k6). Só sobe quando chamado: npm run load:<tipo>
   k6:

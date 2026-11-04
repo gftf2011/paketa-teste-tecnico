@@ -1,6 +1,8 @@
 import { MenuItem } from '../../../domain';
 import { InMemoryMenuItemRepository } from '../in-memory/in-memory-menu-item-repository';
 import { describeMenuItemRepositoryContract } from '../menu-item-repository.contract';
+import { createTestMeter } from '../../../../shared/infra/observability/test-meter.test-helper';
+import { MenuMetrics } from '../../observability/menu-metrics';
 import { CachedMenuItemRepository } from './cached-menu-item-repository';
 
 describeMenuItemRepositoryContract('CachedMenuItemRepository', () => {
@@ -22,7 +24,7 @@ describe('CachedMenuItemRepository (cache)', () => {
   beforeEach(() => {
     inner = new InMemoryMenuItemRepository();
     clock = 0;
-    sut = new CachedMenuItemRepository(inner, TTL, () => clock);
+    sut = new CachedMenuItemRepository(inner, TTL, { now: () => clock });
   });
 
   it('serve leituras seguintes do cache dentro do TTL', async () => {
@@ -106,5 +108,21 @@ describe('CachedMenuItemRepository (cache)', () => {
 
     expect(await staleRead).toHaveLength(0);
     expect(await sut.findAll()).toHaveLength(1);
+  });
+});
+
+describe('CachedMenuItemRepository (métricas)', () => {
+  it('registra hit, miss e coalesced', async () => {
+    const { meter, sum } = createTestMeter();
+    const sut = new CachedMenuItemRepository(new InMemoryMenuItemRepository(), 60_000, {
+      metrics: new MenuMetrics(meter),
+    });
+
+    await Promise.all([sut.findAll(), sut.findAll(), sut.findAll()]);
+    await sut.findAll();
+
+    expect(await sum('menu.cache.requests', { 'menu.cache.result': 'miss' })).toBe(1);
+    expect(await sum('menu.cache.requests', { 'menu.cache.result': 'coalesced' })).toBe(2);
+    expect(await sum('menu.cache.requests', { 'menu.cache.result': 'hit' })).toBe(1);
   });
 });

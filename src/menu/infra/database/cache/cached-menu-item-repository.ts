@@ -1,4 +1,11 @@
 import { MenuItem, MenuItemId, MenuItemRepository } from '../../../domain';
+import { MenuMetrics } from '../../observability/menu-metrics';
+
+export interface CachedMenuItemRepositoryOptions {
+  metrics?: MenuMetrics;
+  /** Relógio injetável, para os testes. */
+  now?: () => number;
+}
 
 /**
  * Decorator que mantém o menu completo (`findAll`) em memória.
@@ -17,11 +24,17 @@ export class CachedMenuItemRepository implements MenuItemRepository {
   private inflight: Promise<MenuItem[]> | null = null;
   private version = 0;
 
+  private readonly metrics: MenuMetrics;
+  private readonly now: () => number;
+
   constructor(
     private readonly inner: MenuItemRepository,
     private readonly ttlMs: number,
-    private readonly now: () => number = Date.now,
-  ) {}
+    options: CachedMenuItemRepositoryOptions = {},
+  ) {
+    this.metrics = options.metrics ?? new MenuMetrics();
+    this.now = options.now ?? Date.now;
+  }
 
   async create(item: MenuItem): Promise<void> {
     await this.inner.create(item);
@@ -34,9 +47,15 @@ export class CachedMenuItemRepository implements MenuItemRepository {
 
   async findAll(): Promise<MenuItem[]> {
     if (this.cache && this.cache.expiresAt > this.now()) {
+      this.metrics.recordCacheRequest('hit');
       return this.cache.items;
     }
-    return this.inflight ?? this.load();
+    if (this.inflight) {
+      this.metrics.recordCacheRequest('coalesced');
+      return this.inflight;
+    }
+    this.metrics.recordCacheRequest('miss');
+    return this.load();
   }
 
   async deleteWithDescendants(id: MenuItemId): Promise<number> {

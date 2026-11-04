@@ -2,7 +2,7 @@
 
 Serviço para gestão do menu de um site corporativo. O menu é formado por itens e sub-itens, com **aninhamento infinito**: cada item é um registro independente no banco que aponta para o seu pai, e a API devolve a árvore completa.
 
-**Stack:** Node.js 24, TypeScript, Express 5 e MongoDB 7.
+**Stack:** Node.js 24, TypeScript, Express 5 e MongoDB 7, com observabilidade via OpenTelemetry.
 
 ## Sumário
 
@@ -11,6 +11,7 @@ Serviço para gestão do menu de um site corporativo. O menu é formado por iten
 - [Arquitetura](#arquitetura)
 - [Decisões técnicas](#decisões-técnicas)
 - [Desempenho e escala](#desempenho-e-escala)
+- [Observabilidade](#observabilidade)
 - [Diferenças em relação ao enunciado](#diferenças-em-relação-ao-enunciado)
 
 ## Como rodar
@@ -19,19 +20,30 @@ Serviço para gestão do menu de um site corporativo. O menu é formado por iten
 
 Requer apenas Docker.
 
+Para subir tudo de uma vez:
+
 ```bash
-npm run docker:up
+npm run up
 ```
 
-O comando constrói a imagem e sobe a API e o MongoDB, terminando quando os dois estão saudáveis. A API fica em `http://localhost:3000`.
+O comando constrói a imagem e sobe a API, o MongoDB e o Grafana com métricas e traces (ver [Observabilidade](#observabilidade)), terminando quando todos estão saudáveis.
+- **API:** `http://localhost:3000`
+- **Grafana:** `http://localhost:3001`
+
+Para desligar tudo:
+
+```bash
+npm run down
+```
 
 | Comando | O que faz |
 |---|---|
-| `npm run docker:up` | Constrói e sobe a API e o MongoDB |
-| `npm run docker:down` | Para os containers (os dados ficam no volume) |
+| `npm run up` | Sobe tudo: API, MongoDB e observabilidade |
+| `npm run down` | Para e remove todos os containers do projeto (os dados do MongoDB ficam no volume) |
+| `npm run docker:up` | Sobe só a API e o MongoDB, sem a observabilidade (imagem de ~3,5 GB) |
 | `npm run docker:logs` | Acompanha os logs da API |
 
-As portas publicadas podem ser trocadas com `API_PORT` e `MONGO_PORT` (ex.: `API_PORT=8080 npm run docker:up`).
+As portas publicadas podem ser trocadas com `API_PORT`, `MONGO_PORT` e `GRAFANA_PORT` (ex.: `API_PORT=8080 npm run up`).
 
 ### Localmente
 
@@ -97,6 +109,10 @@ k6 run -e TEST_TYPE=load load-tests/menu.test.js
 | `MONGO_DB_NAME` | `menu` | Nome do banco |
 | `MONGO_MAX_POOL_SIZE` | `50` | Máximo de conexões no pool |
 | `MENU_CACHE_TTL_MS` | `5000` | Validade do cache do menu em ms; `0` desliga o cache |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | (vazio) | Endpoint OTLP/HTTP do coletor. Sem ele, a telemetria fica desligada |
+| `OTEL_SERVICE_NAME` | `menu-api` | Nome do serviço na telemetria |
+| `OTEL_TRACES_SAMPLER_ARG` | `1` (`0.1` no Compose) | Fração das requisições que viram trace |
+| `OTEL_METRIC_EXPORT_INTERVAL` | `15000` (`10000` no Compose) | Intervalo de envio das métricas, em ms |
 
 ## Endpoints
 
@@ -196,9 +212,10 @@ src/
 │       │   ├── cache/               Decorator de cache do menu
 │       │   ├── in-memory/           Implementação em memória (testes)
 │       │   └── menu-item-repository.contract.ts
-│       └── http/                    Rotas Express e presenter
+│       ├── http/                    Rotas Express e presenter
+│       └── observability/           Métricas de negócio do menu (OpenTelemetry)
 ├── shared/                          DomainError e suas categorias, contrato UseCase, error handler HTTP
-└── main/                            Composition root: config, montagem do app e servidor
+└── main/                            Composition root: config, telemetria, montagem do app e servidor
 ```
 
 As dependências apontam sempre para dentro: `infra` → `application` → `domain`. O domínio define a porta `MenuItemRepository`, e a infraestrutura a implementa.
@@ -286,6 +303,68 @@ A API não guarda estado além do cache, então pode ser escalada horizontalment
 O compromisso: uma escrita feita na instância A aparece na instância B em até `MENU_CACHE_TTL_MS`. Se esse atraso não for aceitável, há duas saídas:
 - **Redis Pub/Sub:** cada escrita publica um aviso de invalidação, e todas as instâncias limpam o cache local. As leituras continuam saindo da memória e o Redis fica fora do caminho da leitura.
 - **Change Streams do MongoDB:** a mesma ideia sem Redis, mas exige que o MongoDB rode como replica set.
+
+## Observabilidade
+
+A API é instrumentada com [OpenTelemetry](https://opentelemetry.io) e envia **traces e métricas** via OTLP/HTTP. A configuração fica em [src/main/telemetry.ts](src/main/telemetry.ts), carregado antes de qualquer outro módulo.
+
+### Como ver
+
+```bash
+npm run up
+```
+
+Além da API e do MongoDB, sobe a imagem [grafana/otel-lgtm](https://github.com/grafana/docker-otel-lgtm), que reúne OTel Collector, Prometheus, Tempo, Loki e Grafana. A imagem tem cerca de 3,5 GB, por isso fica num profile separado.
+
+- **Dashboard:** http://localhost:3001/d/menu-api (sem login). A porta pode ser trocada com `GRAFANA_PORT`.
+- **Traces:** link "Traces no Tempo" no topo do dashboard, ou *Explore → Tempo* com `{resource.service.name="menu-api"}`.
+
+Para ver os gráficos com movimento, gere carga com `npm run load:load`.
+
+Sem o Grafana rodando (`npm run docker:up`), a API tenta exportar e falha em silêncio, sem afetar as requisições. Fora do Docker, a telemetria só liga se `OTEL_EXPORTER_OTLP_ENDPOINT` estiver definido.
+
+### O que é coletado
+
+**Traces** (10% das requisições no Compose, ajustável por `OTEL_TRACES_SAMPLER_ARG`):
+
+```
+POST /api/v1/menu                       (HTTP: método, rota, status, app.error.code)
+├── request handler - /api/v1/menu      (Express)
+├── find menu_items                     (MongoDB: busca do pai)
+└── insert menu_items                   (MongoDB)
+```
+
+- **Erros:** respostas com erro levam o atributo `app.error.code`. Erros 5xx marcam o span como falha e anexam a exceção.
+- **Fora dos traces:** a rota `/health` e os middlewares (JSON, compressão) não geram spans, para não poluir os traces.
+
+**Métricas:**
+
+| Métrica | Tipo | Origem |
+|---|---|---|
+| `http.server.request.duration` | Histograma (rota, método, status) | Instrumentação HTTP + Express |
+| `menu.cache.requests` | Contador (`hit`, `miss`, `coalesced`) | Cache do menu |
+| `menu.items.created` | Contador | Rota de criação |
+| `menu.items.deleted` | Contador (inclui a cascata) | Rota de exclusão |
+| `app.errors` | Contador (código do erro, status) | Error handler |
+| `db.client.connection.count` | Gauge (`idle`, `used`) | Instrumentação MongoDB |
+| `nodejs.eventloop.*`, `v8js.*` | Event loop, heap e GC | Instrumentação de runtime |
+
+O histograma de latência usa buckets a partir de 0,1 ms. Os buckets padrão começam em 5 ms, e a API costuma responder abaixo de 1 ms; com eles, o p50 e o p95 virariam só uma interpolação dentro do primeiro bucket.
+
+As métricas de negócio usam só a API do OpenTelemetry (`@opentelemetry/api`): sem o SDK inicializado, como nos testes, elas não fazem nada. Os testes usam um `MeterProvider` em memória para verificar os valores.
+
+### Dashboard
+
+O dashboard [observability/grafana/dashboards/menu-api.json](observability/grafana/dashboards/menu-api.json) é provisionado automaticamente e tem quatro seções:
+
+1. **Visão geral:** requisições/s, latência p95, taxa de erros 5xx e cache hit ratio.
+2. **Tráfego HTTP (RED):** requisições/s por rota, respostas por status e latência p50, p95 e p99 por rota.
+3. **Menu e cache:** leituras por resultado no cache, itens criados e excluídos, erros por código.
+4. **Runtime Node.js e MongoDB:** utilização e atraso do event loop, heap, GC e pool de conexões.
+
+### Custo
+
+No perfil `load` do k6 (500 req/s), o p95 de leitura foi de 3,9 ms sem telemetria e de 4,2 ms com ela.
 
 ## Diferenças em relação ao enunciado
 

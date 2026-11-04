@@ -1,3 +1,4 @@
+import { Meter, SpanStatusCode, metrics, trace } from '@opentelemetry/api';
 import { ErrorRequestHandler, RequestHandler } from 'express';
 import {
   ConflictError,
@@ -35,24 +36,44 @@ export const routeNotFoundHandler: RequestHandler = (req, res) => {
   res.status(404).json(body);
 };
 
-export const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
-  let status = 500;
-  let body: ErrorResponse = { error: { code: 'INTERNAL_ERROR', message: 'Erro interno do servidor' } };
+/**
+ * Traduz erros em respostas HTTP e os registra na telemetria: contador por
+ * código de erro e atributos no span da requisição (erros 5xx marcam o span
+ * como falha, com a exceção anexada).
+ */
+export function createErrorHandler(meter: Meter = metrics.getMeter('menu-api')): ErrorRequestHandler {
+  const errors = meter.createCounter('app.errors', {
+    description: 'Requisições respondidas com erro, por código de erro',
+    unit: '{error}',
+  });
 
-  if (error instanceof DomainError) {
-    status = statusForDomainError(error);
-    body = { error: { code: error.code, message: error.message } };
-  } else if (isClientHttpError(error)) {
-    status = error.status;
-    body = {
-      error: {
-        code: (error.type ?? 'invalid.request').replace(/\./g, '_').toUpperCase(),
-        message: error.message,
-      },
-    };
-  } else {
-    console.error(error);
-  }
+  return (error, _req, res, _next) => {
+    let status = 500;
+    let body: ErrorResponse = { error: { code: 'INTERNAL_ERROR', message: 'Erro interno do servidor' } };
 
-  res.status(status).json(body);
-};
+    if (error instanceof DomainError) {
+      status = statusForDomainError(error);
+      body = { error: { code: error.code, message: error.message } };
+    } else if (isClientHttpError(error)) {
+      status = error.status;
+      body = {
+        error: {
+          code: (error.type ?? 'invalid.request').replace(/\./g, '_').toUpperCase(),
+          message: error.message,
+        },
+      };
+    } else {
+      console.error(error);
+    }
+
+    const span = trace.getActiveSpan();
+    span?.setAttribute('app.error.code', body.error.code);
+    if (status >= 500) {
+      span?.recordException(error instanceof Error ? error : String(error));
+      span?.setStatus({ code: SpanStatusCode.ERROR, message: body.error.code });
+    }
+    errors.add(1, { 'app.error.code': body.error.code, 'http.response.status_code': status });
+
+    res.status(status).json(body);
+  };
+}

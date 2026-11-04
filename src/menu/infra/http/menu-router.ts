@@ -7,12 +7,14 @@ import {
   GetMenuOutput,
   GetMenuUseCase,
 } from '../../application';
+import { MenuMetrics } from '../observability/menu-metrics';
 import { toMenuResponse } from './menu-presenter';
 
 export interface MenuRouterDependencies {
   createMenuItem: CreateMenuItemUseCase;
   deleteMenuItem: DeleteMenuItemUseCase;
   getMenu: GetMenuUseCase;
+  metrics: MenuMetrics;
 }
 
 interface RenderedMenu {
@@ -47,12 +49,14 @@ export function createMenuRouter(deps: MenuRouterDependencies): Router {
       relatedId: body.relatedId,
     });
 
+    deps.metrics.recordItemCreated();
     res.status(201).json({ id });
   });
 
   router.delete('/:id', async (req, res) => {
     const { deletedCount } = await deps.deleteMenuItem.execute({ id: req.params.id });
 
+    deps.metrics.recordItemsDeleted(deletedCount);
     res.status(200).json({ deletedCount });
   });
 

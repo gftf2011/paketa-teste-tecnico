@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: menu-api
+    folder: Menu API
+    type: file
+    options:
+      path: /otel-lgtm/dashboards/menu-api
