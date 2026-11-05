@@ -2,6 +2,7 @@ import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { ExpressInstrumentation, ExpressLayerType } from '@opentelemetry/instrumentation-express';
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
+import { IORedisInstrumentation } from '@opentelemetry/instrumentation-ioredis';
 import { MongoDBInstrumentation } from '@opentelemetry/instrumentation-mongodb';
 import { RuntimeNodeInstrumentation } from '@opentelemetry/instrumentation-runtime-node';
 import { AggregationType, PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
@@ -12,7 +13,7 @@ import { ParentBasedSampler, TraceIdRatioBasedSampler } from '@opentelemetry/sdk
  * Inicializa o OpenTelemetry (traces e métricas, exportados via OTLP/HTTP).
  *
  * Precisa ser o primeiro import do processo: as instrumentações só
- * interceptam http, express e mongodb se forem registradas antes desses
+ * interceptam http, express, mongodb e ioredis se forem registradas antes desses
  * módulos serem carregados.
  *
  * Fica desligado enquanto OTEL_EXPORTER_OTLP_ENDPOINT não for definido, para
@@ -67,10 +68,14 @@ if (enabled) {
       new HttpInstrumentation({
         ignoreIncomingRequestHook: (req) => req.url === '/health',
       }),
-      // Middlewares (json, compression) gerariam spans de ruído em todo
-      // trace; só os handlers de rota interessam.
-      new ExpressInstrumentation({ ignoreLayersType: [ExpressLayerType.MIDDLEWARE] }),
+      // Só os handlers de rota viram spans. Middlewares (json, compression)
+      // e camadas de router criariam spans em toda requisição, com custo de
+      // CPU e sem informação útil: a rota já vai no span HTTP (http.route).
+      new ExpressInstrumentation({
+        ignoreLayersType: [ExpressLayerType.MIDDLEWARE, ExpressLayerType.ROUTER],
+      }),
       new MongoDBInstrumentation(),
+      new IORedisInstrumentation(),
       new RuntimeNodeInstrumentation(),
     ],
   });

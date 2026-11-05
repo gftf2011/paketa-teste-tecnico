@@ -422,7 +422,7 @@
       "description": "",
       "gridPos": {
         "h": 8,
-        "w": 24,
+        "w": 16,
         "x": 0,
         "y": 14
       },
@@ -484,9 +484,63 @@
       }
     },
     {
+      "type": "timeseries",
+      "title": "Requisições/s por instância",
+      "id": 10,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Uma série por réplica da API. Com o round robin do Nginx, as séries devem ficar próximas.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 14
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (host_name) (rate(http_server_request_duration_seconds_count{job=\"menu-api\"}[$__rate_interval]))",
+          "legendFormat": "{{host_name}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
       "type": "row",
       "title": "Menu e cache",
-      "id": 10,
+      "id": 11,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -498,12 +552,12 @@
     {
       "type": "timeseries",
       "title": "Leituras do menu por resultado no cache",
-      "id": 11,
+      "id": 12,
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "hit: memória · miss: foi ao MongoDB · coalesced: aguardou uma consulta já em andamento (single-flight).",
+      "description": "hit: memória · stale: memória, versão anterior enquanto a nova é recarregada em segundo plano · miss: foi ao MongoDB · coalesced: aguardou uma consulta já em andamento. Só miss e coalesced fazem a leitura esperar o banco.",
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -552,7 +606,7 @@
     {
       "type": "timeseries",
       "title": "Itens criados e excluídos",
-      "id": 12,
+      "id": 13,
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -615,7 +669,7 @@
     {
       "type": "timeseries",
       "title": "Erros por código",
-      "id": 13,
+      "id": 14,
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -667,31 +721,19 @@
       }
     },
     {
-      "type": "row",
-      "title": "Runtime Node.js e MongoDB",
-      "id": 14,
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 31
-      }
-    },
-    {
       "type": "timeseries",
-      "title": "Utilização do event loop",
+      "title": "Invalidações do cache por origem",
       "id": 15,
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Fração do tempo em que o event loop esteve ocupado. Perto de 100%, a API está saturada de CPU.",
+      "description": "local: escrita feita pela própria instância · remote: aviso de outra instância via Redis Pub/Sub (ou reconexão ao Redis).",
       "gridPos": {
         "h": 8,
-        "w": 8,
+        "w": 12,
         "x": 0,
-        "y": 32
+        "y": 31
       },
       "targets": [
         {
@@ -699,8 +741,128 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(nodejs_eventloop_utilization_ratio{job=\"menu-api\"})",
-          "legendFormat": "utilização",
+          "expr": "sum by (menu_cache_invalidation_source) (rate(menu_cache_invalidations_total{job=\"menu-api\"}[$__rate_interval]))",
+          "legendFormat": "{{menu_cache_invalidation_source}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Falhas ao avisar outras instâncias",
+      "id": 16,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Avisos de invalidação que não chegaram ao Redis. Enquanto houver falhas, as outras instâncias se atualizam só pelo TTL.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 31
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(menu_cache_invalidation_publish_failures_total{job=\"menu-api\"}[$__rate_interval])) or vector(0)",
+          "legendFormat": "falhas",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "title": "Runtime Node.js e MongoDB (por instância)",
+      "id": 17,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Utilização do event loop",
+      "id": 18,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Fração do tempo em que o event loop esteve ocupado, por réplica. Perto de 100%, a réplica está saturada de CPU.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 40
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (host_name) (nodejs_eventloop_utilization_ratio{job=\"menu-api\"})",
+          "legendFormat": "{{host_name}}",
           "refId": "A"
         }
       ],
@@ -734,8 +896,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Atraso do event loop",
-      "id": 16,
+      "title": "Atraso do event loop (p99)",
+      "id": 19,
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -745,7 +907,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 32
+        "y": 40
       },
       "targets": [
         {
@@ -753,18 +915,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(nodejs_eventloop_delay_p50_seconds{job=\"menu-api\"})",
-          "legendFormat": "p50",
+          "expr": "max by (host_name) (nodejs_eventloop_delay_p99_seconds{job=\"menu-api\"})",
+          "legendFormat": "{{host_name}}",
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "max(nodejs_eventloop_delay_p99_seconds{job=\"menu-api\"})",
-          "legendFormat": "p99",
-          "refId": "B"
         }
       ],
       "options": {
@@ -798,7 +951,7 @@
     {
       "type": "timeseries",
       "title": "Heap V8 em uso",
-      "id": 17,
+      "id": 20,
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -808,7 +961,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 32
+        "y": 40
       },
       "targets": [
         {
@@ -816,8 +969,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(v8js_memory_heap_used_bytes{job=\"menu-api\"})",
-          "legendFormat": "heap usado",
+          "expr": "sum by (host_name) (v8js_memory_heap_used_bytes{job=\"menu-api\"})",
+          "legendFormat": "{{host_name}}",
           "refId": "A"
         }
       ],
@@ -852,7 +1005,7 @@
     {
       "type": "timeseries",
       "title": "Tempo em GC por segundo",
-      "id": 18,
+      "id": 21,
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -862,7 +1015,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 40
+        "y": 48
       },
       "targets": [
         {
@@ -870,8 +1023,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (v8js_gc_type) (rate(v8js_gc_duration_seconds_sum{job=\"menu-api\"}[$__rate_interval]))",
-          "legendFormat": "{{v8js_gc_type}}",
+          "expr": "sum by (host_name) (rate(v8js_gc_duration_seconds_sum{job=\"menu-api\"}[$__rate_interval]))",
+          "legendFormat": "{{host_name}}",
           "refId": "A"
         }
       ],
@@ -892,10 +1045,10 @@
           "custom": {
             "drawStyle": "line",
             "lineWidth": 1,
-            "fillOpacity": 15,
+            "fillOpacity": 5,
             "showPoints": "never",
             "stacking": {
-              "mode": "normal",
+              "mode": "none",
               "group": "A"
             }
           }
@@ -906,7 +1059,7 @@
     {
       "type": "timeseries",
       "title": "Conexões do pool MongoDB",
-      "id": 19,
+      "id": 22,
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -916,7 +1069,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 40
+        "y": 48
       },
       "targets": [
         {
@@ -924,8 +1077,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (db_client_connection_state) (db_client_connection_count{job=\"menu-api\"})",
-          "legendFormat": "{{db_client_connection_state}}",
+          "expr": "sum by (host_name, db_client_connection_state) (db_client_connection_count{job=\"menu-api\"})",
+          "legendFormat": "{{host_name}} {{db_client_connection_state}}",
           "refId": "A"
         }
       ],
@@ -946,10 +1099,10 @@
           "custom": {
             "drawStyle": "line",
             "lineWidth": 1,
-            "fillOpacity": 15,
+            "fillOpacity": 5,
             "showPoints": "never",
             "stacking": {
-              "mode": "normal",
+              "mode": "none",
               "group": "A"
             }
           }

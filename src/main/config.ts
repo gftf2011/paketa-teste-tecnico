@@ -7,6 +7,13 @@ export interface Config {
   };
   /** Tempo máximo que o menu fica em cache; 0 desliga o cache. */
   menuCacheTtlMs: number;
+  /** Janela para agrupar avisos de outras instâncias numa única recarga. */
+  menuCacheRefreshDelayMs: number;
+  /**
+   * Redis usado para sincronizar o cache entre instâncias (Pub/Sub).
+   * Ausente: cada instância depende só do TTL.
+   */
+  redisUrl?: string;
 }
 
 const readInt = (env: NodeJS.ProcessEnv, key: string, fallback: number): number => {
@@ -29,5 +36,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       maxPoolSize: readInt(env, 'MONGO_MAX_POOL_SIZE', 50),
     },
     menuCacheTtlMs: readInt(env, 'MENU_CACHE_TTL_MS', 5_000),
+    menuCacheRefreshDelayMs: readInt(env, 'MENU_CACHE_REFRESH_DELAY_MS', 50),
+    redisUrl: env.REDIS_URL || undefined,
   };
 }

@@ -5,10 +5,19 @@
  * página, metade revalidando com ETag) e poucas escritas (administração
  * criando e removendo itens).
  *
+ * Cada ciclo de escrita faz 3 escritas (cria raiz, cria filho, exclui), e
+ * cada escrita invalida o cache de todas as réplicas. Os perfis de leitura
+ * usam 2 ciclos/s, um ritmo já alto para um menu corporativo; o perfil
+ * `burst` mede à parte o efeito de uma rajada de escritas.
+ *
  * Variáveis:
- *   TEST_TYPE   smoke | load | stress | spike  (padrão: smoke)
+ *   TEST_TYPE   smoke | load | stress | spike | burst  (padrão: smoke)
  *   BASE_URL    URL da API                    (padrão: http://localhost:3000)
  *   SEED_ITEMS  itens criados antes do teste  (padrão: 500)
+ *   GZIP        1 para pedir respostas comprimidas, como um navegador
+ *               (padrão: desligado). Reduz a CPU da API e do Nginx, mas o k6
+ *               passa a descompactar cada resposta: rodando na mesma máquina
+ *               que a API, o gerador vira o gargalo antes do servidor.
  */
 import http from 'k6/http';
 import { check, fail } from 'k6';
@@ -19,6 +28,7 @@ const MENU_URL = `${BASE_URL}/api/v1/menu`;
 const TEST_TYPE = __ENV.TEST_TYPE || 'smoke';
 const SEED_ITEMS = Number(__ENV.SEED_ITEMS || 500);
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
+const READ_HEADERS = __ENV.GZIP === '1' ? { 'Accept-Encoding': 'gzip' } : {};
 
 /** Fração das leituras respondidas com 304 (cliente já tinha a versão atual). */
 const notModifiedRate = new Rate('menu_not_modified');
@@ -47,6 +57,16 @@ const writers = (rate, duration) => ({
   maxVUs: 50,
 });
 
+const writersRamping = (stages) => ({
+  executor: 'ramping-arrival-rate',
+  exec: 'writeMenu',
+  startRate: 0,
+  timeUnit: '1s',
+  preAllocatedVUs: 20,
+  maxVUs: 200,
+  stages,
+});
+
 const PROFILES = {
   // Sanidade: carga mínima, valida que tudo responde corretamente.
   smoke: {
@@ -65,7 +85,7 @@ const PROFILES = {
         { target: 500, duration: '2m' },
         { target: 0, duration: '15s' },
       ]),
-      writers: writers(5, '2m45s'),
+      writers: writers(2, '2m45s'),
     },
     p95ReadMs: 100,
     p95WriteMs: 200,
@@ -79,7 +99,7 @@ const PROFILES = {
         { target: 3000, duration: '1m' },
         { target: 0, duration: '15s' },
       ], { preAllocatedVUs: 300 }),
-      writers: writers(10, '2m45s'),
+      writers: writers(2, '2m45s'),
     },
     p95ReadMs: 500,
     p95WriteMs: 1000,
@@ -101,6 +121,22 @@ const PROFILES = {
     },
     p95ReadMs: 500,
     p95WriteMs: 1000,
+  },
+  // Rajada de escritas com leitura constante: cada escrita invalida o cache
+  // das réplicas. Mede se as leituras continuam rápidas (stale-while-
+  // revalidate e agrupamento das recargas).
+  burst: {
+    scenarios: {
+      readers: readers([{ target: 1000, duration: '1m30s' }], { startRate: 1000, preAllocatedVUs: 200 }),
+      writers: writersRamping([
+        { target: 2, duration: '20s' },
+        { target: 20, duration: '20s' },
+        { target: 20, duration: '30s' },
+        { target: 2, duration: '20s' },
+      ]),
+    },
+    p95ReadMs: 100,
+    p95WriteMs: 500,
   },
 };
 
@@ -176,7 +212,7 @@ export function readMenu() {
   // Metade das leituras simula um navegador que já tem o menu em cache.
   const revalidate = etag !== null && Math.random() < 0.5;
   const res = http.get(MENU_URL, {
-    headers: revalidate ? { 'If-None-Match': etag } : {},
+    headers: revalidate ? { ...READ_HEADERS, 'If-None-Match': etag } : READ_HEADERS,
     tags: { name: 'GET /api/v1/menu' },
   });
 

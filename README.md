@@ -2,7 +2,7 @@
 
 Serviço para gestão do menu de um site corporativo. O menu é formado por itens e sub-itens, com **aninhamento infinito**: cada item é um registro independente no banco que aponta para o seu pai, e a API devolve a árvore completa.
 
-**Stack:** Node.js 24, TypeScript, Express 5 e MongoDB 7, com observabilidade via OpenTelemetry.
+**Stack:** Node.js 24, TypeScript, Express 5 e MongoDB 7. No Docker, roda em 3 instâncias atrás de um Nginx, com os caches sincronizados por Redis Pub/Sub e observabilidade via OpenTelemetry.
 
 ## Sumário
 
@@ -27,9 +27,28 @@ Para subir tudo de uma vez:
 npm run up
 ```
 
-O comando constrói a imagem e sobe a API, o MongoDB e o Grafana com métricas e traces (ver [Observabilidade](#observabilidade)), terminando quando todos estão saudáveis.
-- **API:** `http://localhost:3000`
+O comando constrói a imagem e sobe a stack completa, terminando quando todos os serviços estão saudáveis:
+- **API (via Nginx):** `http://localhost:3000`
 - **Grafana:** `http://localhost:3001`
+
+```
+                      ┌────────────┐
+ cliente ─── :3000 ──▶│   Nginx    │ round robin
+                      └─────┬──────┘
+             ┌──────────────┼──────────────┐
+             ▼              ▼              ▼
+        ┌─────────┐    ┌─────────┐    ┌─────────┐
+        │  api-1  │    │  api-2  │    │  api-3  │   cache em memória em cada uma
+        └────┬────┘    └────┬────┘    └────┬────┘
+             │   ┌──────────┴──────────┐   │
+             ├──▶│ Redis (Pub/Sub)     │◀──┤      avisos de invalidação do cache
+             │   └─────────────────────┘   │
+             └──────────▶ MongoDB ◀────────┘      dados
+                     OTLP ▼
+              Grafana LGTM (:3001)                 métricas e traces
+```
+
+Veja [Várias instâncias](#várias-instâncias) e [Observabilidade](#observabilidade).
 
 Para desligar tudo:
 
@@ -39,12 +58,16 @@ npm run down
 
 | Comando | O que faz |
 |---|---|
-| `npm run up` | Sobe tudo: API, MongoDB e observabilidade |
+| `npm run up` | Sobe tudo: Nginx, 3 réplicas da API, MongoDB, Redis e observabilidade |
 | `npm run down` | Para e remove todos os containers do projeto (os dados do MongoDB ficam no volume) |
-| `npm run docker:up` | Sobe só a API e o MongoDB, sem a observabilidade (imagem de ~3,5 GB) |
+| `npm run docker:up` | Sobe tudo, menos a observabilidade (imagem de ~3,5 GB) |
 | `npm run docker:logs` | Acompanha os logs da API |
 
-As portas publicadas podem ser trocadas com `API_PORT`, `MONGO_PORT` e `GRAFANA_PORT` (ex.: `API_PORT=8080 npm run up`).
+Variáveis aceitas pelo Compose:
+- **Portas publicadas:** `API_PORT`, `MONGO_PORT`, `REDIS_PORT` e `GRAFANA_PORT` (ex.: `API_PORT=8080 npm run up`).
+- **`API_REPLICAS`:** quantidade de instâncias da API; o padrão é 3 (ex.: `API_REPLICAS=5 npm run up`). O Nginx descobre as réplicas pelo DNS do Docker, sem precisar de configuração.
+- **`MENU_CACHE_TTL_MS`** e **`MENU_CACHE_REFRESH_DELAY_MS`:** validade do cache do menu e janela de agrupamento das recargas, em ms.
+- **`OTEL_SDK_DISABLED=true`:** desliga o OpenTelemetry nas réplicas, para comparar medições.
 
 ### Localmente
 
@@ -55,7 +78,7 @@ npm install
 npm run dev:docker
 ```
 
-O MongoDB sobe no Docker e a API roda localmente, recarregando a cada alteração. Para usar outro MongoDB, defina `MONGO_URL` e rode `npm run dev`.
+O MongoDB sobe no Docker e uma única instância da API roda localmente, recarregando a cada alteração. Sem `REDIS_URL`, o cache funciona só com o TTL, o que basta para uma instância. Para usar outro MongoDB, defina `MONGO_URL` e rode `npm run dev`.
 
 Não rode `dev:docker` junto com `docker:up`: os dois usam a porta 3000.
 
@@ -68,6 +91,12 @@ npm run typecheck
 
 Os testes do repositório MongoDB usam o [mongodb-memory-server](https://github.com/typegoose/mongodb-memory-server), que baixa o binário do MongoDB na primeira execução. Não é preciso ter um banco rodando.
 
+Os testes de integração do Redis Pub/Sub precisam de um Redis real e são pulados sem ele. Com a stack no ar (`npm run up`), rode:
+
+```bash
+REDIS_URL=redis://localhost:6379 npm test
+```
+
 ### Testes de carga (k6)
 
 O script [load-tests/menu.test.js](load-tests/menu.test.js) roda com o [k6](https://k6.io) dentro do Docker Compose, então não é preciso instalá-lo. Cada comando sobe a API e o MongoDB, se ainda não estiverem rodando, e executa o teste:
@@ -77,14 +106,18 @@ npm run load:smoke
 npm run load:load
 npm run load:stress
 npm run load:spike
+npm run load:burst
 ```
 
 | Perfil | Leituras (GET) | Escritas | Duração | Objetivo |
 |---|---|---|---|---|
 | `smoke` | 10 req/s | 1 ciclo/s | 30 s | Sanidade: tudo responde corretamente |
-| `load` | Rampa até 500 req/s, sustentada por 2 min | 5 ciclos/s | ~3 min | Carga esperada em produção |
-| `stress` | Rampa até 3000 req/s | 10 ciclos/s | ~3 min | Achar o limite |
+| `load` | Rampa até 500 req/s, sustentada por 2 min | 2 ciclos/s | ~3 min | Carga esperada em produção |
+| `stress` | Rampa até 3000 req/s | 2 ciclos/s | ~3 min | Achar o limite |
 | `spike` | De 50 para 3000 req/s em 10 s | 2 ciclos/s | 1,5 min | Pico repentino de acessos |
+| `burst` | 1000 req/s constantes | Sobe até 20 ciclos/s (60 escritas/s) | 1,5 min | Rajada de escritas: as leituras continuam rápidas? |
+
+Cada ciclo de escrita faz 3 escritas, e cada uma invalida o cache das 3 réplicas. Dois ciclos por segundo já é um ritmo alto para um menu corporativo; o `burst` mede à parte o efeito de uma rajada.
 
 Como o teste funciona:
 - **Preparação:** o `setup` popula o menu com 500 itens em árvore. Para mudar a quantidade, rode o k6 com `-e SEED_ITEMS=<n>`.
@@ -94,6 +127,10 @@ Como o teste funciona:
 - **Critérios de aprovação:** menos de 1% de falhas, mais de 99% de checks aprovados e p95 abaixo do limite de cada perfil.
 
 As leituras usam taxa de chegada constante (*arrival rate*): a carga não diminui quando a API fica lenta, como acontece com usuários reais.
+
+Com `-e GZIP=1`, as leituras pedem resposta comprimida, como um navegador. Isso reduz a CPU da API e do Nginx, mas o k6 passa a descompactar cada resposta. Com o k6 rodando na mesma máquina que a API, o gerador vira o gargalo antes do servidor, então o padrão é sem gzip.
+
+**Limite da máquina:** os perfis `stress` e `spike` (3000 req/s) saturam um computador que roda ao mesmo tempo o k6, 3 réplicas, o Nginx, o MongoDB e o Grafana. Só o k6 chega a usar de 2 a 4 CPUs. Nessa situação o resultado varia até 2 vezes entre rodadas idênticas (ver [Resultados do k6](#resultados-do-k6)). Para medir a capacidade real, rode o k6 em outra máquina.
 
 Com o k6 instalado localmente e a API rodando, também dá para executar direto:
 
@@ -110,6 +147,8 @@ k6 run -e TEST_TYPE=load load-tests/menu.test.js
 | `MONGO_DB_NAME` | `menu` | Nome do banco |
 | `MONGO_MAX_POOL_SIZE` | `50` | Máximo de conexões no pool |
 | `MENU_CACHE_TTL_MS` | `5000` | Validade do cache do menu em ms; `0` desliga o cache |
+| `MENU_CACHE_REFRESH_DELAY_MS` | `50` | Janela para agrupar escritas numa única recarga do cache, em ms |
+| `REDIS_URL` | (vazio) | Redis usado para sincronizar o cache entre instâncias. Sem ele, cada instância depende só do TTL |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | (vazio) | Endpoint OTLP/HTTP do coletor. Sem ele, a telemetria fica desligada |
 | `OTEL_SERVICE_NAME` | `menu-api` | Nome do serviço na telemetria |
 | `OTEL_TRACES_SAMPLER_ARG` | `1` (`0.1` no Compose) | Fração das requisições que viram trace |
@@ -493,8 +532,18 @@ src/
 │       │   └── menu-item-repository.contract.ts
 │       ├── http/                    Rotas Express e presenter
 │       └── observability/           Métricas de negócio do menu (OpenTelemetry)
-├── shared/                          DomainError e suas categorias, contrato UseCase, error handler HTTP
+├── shared/
+│   ├── domain/                      DomainError e suas categorias
+│   ├── application/                 Contrato UseCase
+│   └── infra/
+│       ├── cache-invalidation/      Barramento de invalidação de cache (porta, Redis e memória)
+│       ├── http/                    Error handler
+│       └── observability/           Helper de métricas para testes
 └── main/                            Composition root: config, telemetria, montagem do app e servidor
+
+nginx/default.conf                   Balanceador de carga (round robin)
+observability/                       Dashboard e provisionamento do Grafana
+load-tests/                          Testes de carga (k6)
 ```
 
 As dependências apontam sempre para dentro: `infra` → `application` → `domain`. O domínio define a porta `MenuItemRepository`, e a infraestrutura a implementa.
@@ -543,9 +592,11 @@ O [`buildMenuTree`](src/menu/domain/services/menu-tree.ts) é iterativo, sem rec
 O menu é lido muito mais do que alterado, então o caminho de leitura foi otimizado em camadas:
 
 1. **Cache do menu** ([cached-menu-item-repository.ts](src/menu/infra/database/cache/cached-menu-item-repository.ts)): guarda a lista de itens em memória por até `MENU_CACHE_TTL_MS`.
-   - Escritas da própria instância limpam o cache na hora.
-   - Leituras simultâneas com o cache vazio compartilham uma única consulta ao banco (*single-flight*).
-   - Uma leitura que começou antes de uma escrita nunca grava dados antigos no cache.
+   - **Stale-while-revalidate:** uma escrita, nesta ou em outra instância (ver [Várias instâncias](#várias-instâncias)), não apaga o cache; ela o marca como desatualizado. As leituras seguem respondendo da memória com a versão anterior enquanto **uma única** recarga roda em segundo plano. Nenhuma leitura espera o MongoDB, exceto a primeira de uma instância recém-iniciada.
+   - **Escritas em rajada viram uma recarga só:** escritas dentro de `MENU_CACHE_REFRESH_DELAY_MS` (50 ms) são agrupadas. Se chegar outra escrita durante a recarga, o resultado é descartado e uma nova recarga é agendada.
+   - **O mesmo vale quando o TTL vence:** responde com a versão anterior e recarrega em segundo plano. Se a recarga falha, a versão anterior continua sendo servida e a próxima leitura tenta de novo.
+   - **O preço:** por cerca de 50 ms mais uma consulta depois de uma escrita, uma leitura pode devolver a versão anterior, inclusive na própria instância que escreveu. Atrás do Nginx isso já acontecia: a leitura seguinte do cliente cai, em geral, em outra réplica.
+   - **Single-flight:** leituras simultâneas com o cache vazio compartilham uma única consulta ao banco.
 2. **Árvore memorizada:** o `GetMenuUseCase` só remonta a árvore quando a lista de itens muda.
 3. **Resposta pré-renderizada:** o router guarda o JSON, a versão gzip e o ETag de cada versão do menu. Enquanto o menu não muda, cada requisição só envia bytes prontos.
 4. **ETag e 304:** clientes que já têm a versão atual recebem 304, sem corpo.
@@ -562,7 +613,7 @@ Todas as consultas usam índice, conferido com `explain`: `IXSCAN` no `_id` e em
 
 ### Resultados do k6
 
-A stack rodou no Docker Desktop (VM com 8 CPUs e 4 GB), com uma única instância da API e o k6 na mesma máquina. O menu tinha 500 itens.
+A stack rodou no Docker Desktop (VM com 8 CPUs e 4 GB), com o k6 na mesma máquina. O menu tinha 500 itens. Estas medições são de antes do Nginx: uma única instância da API, acessada diretamente. A medição com 3 réplicas está em [Várias instâncias](#várias-instâncias).
 
 | Perfil | Requisições | Falhas | p95 leitura | p99 leitura | p95 escrita |
 |---|---|---|---|---|---|
@@ -577,12 +628,79 @@ A stack rodou no Docker Desktop (VM com 8 CPUs e 4 GB), com uma única instânci
 
 ### Várias instâncias
 
-A API não guarda estado além do cache, então pode ser escalada horizontalmente. Cada instância consulta o MongoDB no máximo uma vez por TTL. Com 50 instâncias e TTL de 5 s, são cerca de 10 consultas por segundo.
+No Docker, a API roda em **3 réplicas** (`API_REPLICAS`) atrás de um **Nginx** que distribui as requisições em round robin. A API não guarda estado além do cache, então escala horizontalmente.
 
-O compromisso: uma escrita feita na instância A aparece na instância B em até `MENU_CACHE_TTL_MS`. Se esse atraso não for aceitável, há duas saídas:
-- **Redis Pub/Sub:** cada escrita publica um aviso de invalidação, e todas as instâncias limpam o cache local. As leituras continuam saindo da memória e o Redis fica fora do caminho da leitura.
-- **Change Streams do MongoDB:** a mesma ideia sem Redis, mas exige que o MongoDB rode como replica set.
+**Nginx** ([nginx/default.conf](nginx/default.conf)):
+- **Descoberta das réplicas:** o upstream aponta para `api:3000` com a opção `resolve`. O DNS do Docker devolve um IP por réplica, e o Nginx o consulta de novo a cada 5 s, então réplicas novas ou recriadas entram no rodízio sem reiniciar o Nginx.
+- **Conexões reaproveitadas:** usa `keepalive` com as réplicas, em vez de abrir uma conexão TCP por requisição.
+- **Réplica fora do ar:** se uma réplica cai, o Nginx tenta a próxima. Isso vale só para requisições idempotentes; um POST nunca é repetido.
+- **Cabeçalho `X-Upstream-Addr`:** mostra qual réplica respondeu, o que deixa o round robin visível.
 
+**Cache sincronizado por Redis Pub/Sub.** Cada réplica tem seu próprio cache em memória. Sem sincronização, uma escrita feita na réplica A só apareceria na réplica B quando o TTL vencesse. Com o Redis:
+
+```
+POST /api/v1/menu ─▶ api-1: grava no MongoDB ─▶ marca o cache como desatualizado ─▶ PUBLISH menu:cache:invalidated <id da api-1>
+                                                                                              │
+                     api-2, api-3 ◀────────────────── SUBSCRIBE menu:cache:invalidated ◀─────┘
+                     marcam o cache como desatualizado e recarregam em segundo plano (~50 ms),
+                     seguindo com a versão anterior enquanto isso
+```
+
+- **O Redis só transporta o aviso, não o menu.** As leituras continuam saindo da memória de cada réplica, então o Redis fica fora do caminho da leitura e não acrescenta latência a ela.
+- **Cada réplica ignora o próprio aviso.** A mensagem leva o id da réplica que publicou.
+- **Uma falha do Redis não falha a escrita,** que já foi gravada no MongoDB. O aviso perdido é contado na métrica `menu.cache.invalidation.publish_failures`, e as outras réplicas se atualizam pelo TTL.
+- **Redis fora do ar não segura requisições.** A conexão de publicação não enfileira comandos enquanto está offline, então o `publish` falha na hora em vez de esperar.
+- **Reconexão:** ao reconectar, cada réplica assina o canal de novo e descarta o cache, porque mensagens enviadas durante a queda foram perdidas. O Pub/Sub entrega "no máximo uma vez", por isso o TTL continua valendo como rede de segurança.
+- **A API sobe mesmo sem Redis:** espera até 5 s pela assinatura e segue em frente; a assinatura é feita assim que o Redis estiver disponível.
+
+A implementação fica atrás da porta [`CacheInvalidationBus`](src/shared/infra/cache-invalidation/cache-invalidation-bus.ts), com dois adaptadores: [Redis](src/shared/infra/cache-invalidation/redis-cache-invalidation-bus.ts) e [memória](src/shared/infra/cache-invalidation/in-memory-cache-invalidation-bus.ts). O cache não sabe que o Redis existe. Os testes simulam várias instâncias com o adaptador em memória, e o adaptador Redis tem testes de integração com um Redis real, incluindo uma queda forçada da conexão.
+
+**Verificação na stack**, com as réplicas rodando com TTL de 10 minutos para que só o Pub/Sub explique a atualização:
+
+| Passo | Resultado |
+|---|---|
+| 6 GETs pelo Nginx | Rodízio entre as 3 réplicas: `.6`, `.7`, `.5`, `.6`, `.7`, `.5` |
+| POST, seguido de GETs imediatos | Algumas réplicas ainda devolvem a versão anterior (stale-while-revalidate) |
+| Os mesmos GETs 200 ms depois | As 3 réplicas devolvem o item novo; o mesmo vale para o DELETE |
+| Redis parado, POST (caiu na `.7`) | 201: a escrita funciona. Só a `.7` mostra o item novo; as outras ficam com o menu antigo |
+| Redis religado | As 3 réplicas reconectam, descartam o cache e voltam a concordar |
+
+**k6 pelo Nginx** (perfil `load`, 500 req/s com escritas contínuas, 3 réplicas):
+
+| Requisições | Falhas | p95 leitura | p99 leitura | p95 escrita | Por réplica |
+|---|---|---|---|---|---|
+| 74.751 | 0% | 11,9 ms | 42,9 ms | 12,8 ms | ~25.830 cada |
+
+- **Contagem de invalidações:** foram 2.967 locais e 6.239 remotas. Cada escrita avisou as outras duas réplicas, e nenhum aviso falhou.
+- **Latência maior que na instância única direta** (3,9 ms):
+  - **Salto extra:** toda requisição passa pelo Nginx.
+  - **Trabalho triplicado:** o teste faz cerca de 15 escritas por segundo sem parar, e cada uma limpa o cache das 3 réplicas. Cada réplica remonta, serializa e comprime o menu a cada escrita, então esse trabalho passa a acontecer 3 vezes.
+  - **CPU dividida:** tudo divide a mesma VM de 8 CPUs com o k6, o MongoDB e o Grafana.
+
+  Num menu real, que muda poucas vezes por dia, quase todas as leituras saem da resposta pronta em memória.
+
+Essa medição é de antes do stale-while-revalidate. Os resultados depois dele estão logo abaixo.
+
+**Rajadas de escrita.** Antes, cada escrita apagava o cache de todas as réplicas, e as leituras seguintes esperavam o MongoDB. Com o stale-while-revalidate e as recargas agrupadas, o perfil `burst` (1000 leituras/s e até 60 escritas/s):
+
+| | Antes | Depois |
+|---|---|---|
+| p95 leitura | 1,18 s | **5,5 ms** |
+| p95 escrita | 1,03 s | **7,4 ms** |
+| Requisições/s (alvo: 1000) | 650 | **1.045** |
+| Iterações que o k6 não conseguiu disparar | 31.556 | **105** |
+| Revalidações respondidas com 304 | 33% | **85%** |
+| Leituras que esperaram o MongoDB (`miss` + `coalesced`) | ~25.800 | **0** |
+
+**`stress` (alvo de 3000 req/s), com o mesmo script nas duas versões** (o perfil anterior, com 10 ciclos de escrita/s):
+
+| | Antes | Depois (2 rodadas) |
+|---|---|---|
+| Requisições/s | 800 | 966 a 1.486 |
+| p95 leitura | 1,1 s | 187 a 638 ms |
+| Falhas | 0% | 0% |
+
+Esse perfil satura a máquina: rodando junto com as réplicas, o k6 usou de 2,2 a 3,8 CPUs. Para entender o limite, testei também sem o Grafana, sem o Nginx (k6 direto nas réplicas) e sem o OpenTelemetry. Em todos os casos o throughput ficou na mesma faixa, de 700 a 1.500 req/s, e duas rodadas idênticas chegaram a variar quase 2 vezes. O limite é desta máquina rodando tudo junto, não de um componente específico.
 ## Observabilidade
 
 A API é instrumentada com [OpenTelemetry](https://opentelemetry.io) e envia **traces e métricas** via OTLP/HTTP. A configuração fica em [src/main/telemetry.ts](src/main/telemetry.ts), carregado antes de qualquer outro módulo.
@@ -610,21 +728,24 @@ Sem o Grafana rodando (`npm run docker:up`), a API tenta exportar e falha em sil
 POST /api/v1/menu                       (HTTP: método, rota, status, app.error.code)
 ├── request handler - /api/v1/menu      (Express)
 ├── find menu_items                     (MongoDB: busca do pai)
-└── insert menu_items                   (MongoDB)
+├── insert menu_items                   (MongoDB)
+└── publish                             (Redis: aviso às outras instâncias)
 ```
 
 - **Erros:** respostas com erro levam o atributo `app.error.code`. Erros 5xx marcam o span como falha e anexam a exceção.
-- **Fora dos traces:** a rota `/health` e os middlewares (JSON, compressão) não geram spans, para não poluir os traces.
+- **Fora dos traces:** a rota `/health`, os middlewares (JSON, compressão) e as camadas de router do Express não geram spans. Só o handler da rota vira span, e a rota já vai como atributo no span HTTP (`http.route`).
 
 **Métricas:**
 
 | Métrica | Tipo | Origem |
 |---|---|---|
 | `http.server.request.duration` | Histograma (rota, método, status) | Instrumentação HTTP + Express |
-| `menu.cache.requests` | Contador (`hit`, `miss`, `coalesced`) | Cache do menu |
+| `menu.cache.requests` | Contador (`hit`, `stale`, `miss`, `coalesced`) | Cache do menu |
 | `menu.items.created` | Contador | Rota de criação |
 | `menu.items.deleted` | Contador (inclui a cascata) | Rota de exclusão |
 | `app.errors` | Contador (código do erro, status) | Error handler |
+| `menu.cache.invalidations` | Contador (`local`, `remote`) | Cache do menu |
+| `menu.cache.invalidation.publish_failures` | Contador | Cache do menu (aviso ao Redis que falhou) |
 | `db.client.connection.count` | Gauge (`idle`, `used`) | Instrumentação MongoDB |
 | `nodejs.eventloop.*`, `v8js.*` | Event loop, heap e GC | Instrumentação de runtime |
 
@@ -637,13 +758,15 @@ As métricas de negócio usam só a API do OpenTelemetry (`@opentelemetry/api`):
 O dashboard [observability/grafana/dashboards/menu-api.json](observability/grafana/dashboards/menu-api.json) é provisionado automaticamente e tem quatro seções:
 
 1. **Visão geral:** requisições/s, latência p95, taxa de erros 5xx e cache hit ratio.
-2. **Tráfego HTTP (RED):** requisições/s por rota, respostas por status e latência p50, p95 e p99 por rota.
-3. **Menu e cache:** leituras por resultado no cache, itens criados e excluídos, erros por código.
+2. **Tráfego HTTP (RED):** requisições/s por rota, respostas por status, latência p50, p95 e p99 por rota e requisições/s por instância (mostra o round robin).
+3. **Menu e cache:** leituras por resultado no cache, itens criados e excluídos, erros por código, invalidações por origem (local ou remota) e falhas ao avisar outras instâncias.
 4. **Runtime Node.js e MongoDB:** utilização e atraso do event loop, heap, GC e pool de conexões.
 
 ### Custo
 
-No perfil `load` do k6 (500 req/s), o p95 de leitura foi de 3,9 ms sem telemetria e de 4,2 ms com ela.
+Medi a CPU das réplicas a partir do cgroup de cada container, com 1000 leituras/s, depois de uma rodada de aquecimento: 0,69 ms de CPU por requisição sem OpenTelemetry e 0,60 ms com ele, uma diferença dentro do ruído. No perfil `load` (500 req/s), o p95 de leitura foi de 3,9 ms sem telemetria e de 4,2 ms com ela.
+
+Em produção, o Grafana, o Prometheus e o Tempo ficam em hosts separados. Aqui eles dividem a máquina com a API, e a amostragem de traces (10% no Compose, ajustável por `OTEL_TRACES_SAMPLER_ARG`) limita quanto trabalho eles recebem.
 
 ## Diferenças em relação ao enunciado
 

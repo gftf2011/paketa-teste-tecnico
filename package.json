@@ -16,7 +16,8 @@
     "load:smoke": "docker compose run --rm k6 run -e TEST_TYPE=smoke /scripts/menu.test.js",
     "load:load": "docker compose run --rm k6 run -e TEST_TYPE=load /scripts/menu.test.js",
     "load:stress": "docker compose run --rm k6 run -e TEST_TYPE=stress /scripts/menu.test.js",
-    "load:spike": "docker compose run --rm k6 run -e TEST_TYPE=spike /scripts/menu.test.js"
+    "load:spike": "docker compose run --rm k6 run -e TEST_TYPE=spike /scripts/menu.test.js",
+    "load:burst": "docker compose run --rm k6 run -e TEST_TYPE=burst /scripts/menu.test.js"
   },
   "repository": {
     "type": "git",
@@ -36,6 +37,7 @@
     "@opentelemetry/exporter-trace-otlp-http": "^0.300.0",
     "@opentelemetry/instrumentation-express": "^0.72.0",
     "@opentelemetry/instrumentation-http": "^0.300.0",
+    "@opentelemetry/instrumentation-ioredis": "^0.72.0",
     "@opentelemetry/instrumentation-mongodb": "^0.77.0",
     "@opentelemetry/instrumentation-runtime-node": "^0.37.0",
     "@opentelemetry/resources": "^3.0.0",
@@ -45,6 +47,7 @@
     "@opentelemetry/semantic-conventions": "^1.44.0",
     "compression": "^1.8.2",
     "express": "^5.3.0",
+    "ioredis": "^5.11.1",
     "mongodb": "^6.22.0",
     "uuid": "^11.1.1"
   },
