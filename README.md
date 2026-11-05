@@ -234,38 +234,28 @@ Exemplos de cada caso estão na seção [Exemplos com curl](#exemplos-com-curl).
 
 ## Exemplos com curl
 
-Os exemplos usam a variável `API`. Os que extraem ids usam o [jq](https://jqlang.org).
-
-```bash
-API=http://localhost:3000/api/v1/menu
-```
-
-Os ids variam a cada execução; os das respostas abaixo são ilustrativos.
+Os exemplos precisam da API rodando (`npm run up` ou `npm run docker:up`) e do [jq](https://jqlang.org), usado para guardar os ids. Os comandos podem ser colados direto no terminal (bash ou zsh), na ordem em que aparecem; a resposta esperada vem logo abaixo de cada um. Os ids variam a cada execução; os das respostas são ilustrativos.
 
 ### Montar o menu do enunciado
 
-Cria os 12 itens do exemplo do desafio, guardando o id de cada pai para usar como `relatedId` dos filhos:
+Cria os 12 itens do exemplo do desafio. Cada linha guarda o id do item criado numa variável, usada como `relatedId` dos filhos:
 
 ```bash
-# Cria um item e imprime o id gerado. Uso: criar "Nome" [idDoPai]
-criar() {
-  if [ -n "$2" ]; then body="{\"name\": \"$1\", \"relatedId\": \"$2\"}"; else body="{\"name\": \"$1\"}"; fi
-  curl -s -X POST "$API" -H 'Content-Type: application/json' -d "$body" | jq -r .id
-}
+API=http://localhost:3000/api/v1/menu
 
-ELETRO=$(criar "Eletrodomésticos")
-TV=$(criar "Televisores" "$ELETRO")
-LCD=$(criar "LCD" "$TV")
-criar "110" "$LCD" > /dev/null
-criar "220" "$LCD" > /dev/null
-criar "Plasma" "$TV" > /dev/null
+ELETRO=$(curl -s -X POST "$API" -H 'Content-Type: application/json' -d '{"name": "Eletrodomésticos"}' | jq -r .id)
+TV=$(curl -s -X POST "$API" -H 'Content-Type: application/json' -d '{"name": "Televisores", "relatedId": "'$ELETRO'"}' | jq -r .id)
+LCD=$(curl -s -X POST "$API" -H 'Content-Type: application/json' -d '{"name": "LCD", "relatedId": "'$TV'"}' | jq -r .id)
+V110=$(curl -s -X POST "$API" -H 'Content-Type: application/json' -d '{"name": "110", "relatedId": "'$LCD'"}' | jq -r .id)
+V220=$(curl -s -X POST "$API" -H 'Content-Type: application/json' -d '{"name": "220", "relatedId": "'$LCD'"}' | jq -r .id)
+PLASMA=$(curl -s -X POST "$API" -H 'Content-Type: application/json' -d '{"name": "Plasma", "relatedId": "'$TV'"}' | jq -r .id)
 
-INFO=$(criar "Informática")
-PCS=$(criar "Computadores" "$INFO")
-APPLE=$(criar "Apple" "$PCS")
-MACBOOK=$(criar "MacBook" "$APPLE")
-criar "Cabos" "$MACBOOK" > /dev/null
-criar "iMac" "$APPLE" > /dev/null
+INFO=$(curl -s -X POST "$API" -H 'Content-Type: application/json' -d '{"name": "Informática"}' | jq -r .id)
+PCS=$(curl -s -X POST "$API" -H 'Content-Type: application/json' -d '{"name": "Computadores", "relatedId": "'$INFO'"}' | jq -r .id)
+APPLE=$(curl -s -X POST "$API" -H 'Content-Type: application/json' -d '{"name": "Apple", "relatedId": "'$PCS'"}' | jq -r .id)
+MACBOOK=$(curl -s -X POST "$API" -H 'Content-Type: application/json' -d '{"name": "MacBook", "relatedId": "'$APPLE'"}' | jq -r .id)
+CABOS=$(curl -s -X POST "$API" -H 'Content-Type: application/json' -d '{"name": "Cabos", "relatedId": "'$MACBOOK'"}' | jq -r .id)
+IMAC=$(curl -s -X POST "$API" -H 'Content-Type: application/json' -d '{"name": "iMac", "relatedId": "'$APPLE'"}' | jq -r .id)
 
 curl -s "$API" | jq
 ```
@@ -322,42 +312,48 @@ O GET devolve a mesma árvore do enunciado, com UUIDs no lugar dos ids numérico
 ]
 ```
 
+As variáveis `ELETRO`, `TV`, `INFO` etc. continuam valendo para os exemplos seguintes.
+
 ### Criar itens
 
 Item raiz:
 
 ```bash
-curl -X POST "$API" \
-  -H 'Content-Type: application/json' \
-  -d '{"name": "Linha Branca"}'
-# 201 {"id":"01a1a8f3-b896-764b-953c-dcef4961ae78"}
+curl -X POST "$API" -H 'Content-Type: application/json' -d '{"name": "Linha Branca"}'
 ```
 
-Sub-item, informando o id do pai em `relatedId` (aqui, o `$ELETRO` do menu montado acima):
+```text
+201 {"id":"01a1a8f3-b896-764b-953c-dcef4961ae78"}
+```
+
+Sub-item, informando o id do pai em `relatedId`:
 
 ```bash
-curl -X POST "$API" \
-  -H 'Content-Type: application/json' \
-  -d "{\"name\": \"Geladeiras\", \"relatedId\": \"$ELETRO\"}"
-# 201 {"id":"01a1a8f3-b8be-723d-ab07-930e1c95c162"}
+curl -X POST "$API" -H 'Content-Type: application/json' -d '{"name": "Geladeiras", "relatedId": "'$ELETRO'"}'
+```
+
+```text
+201 {"id":"01a1a8f3-b8be-723d-ab07-930e1c95c162"}
 ```
 
 `relatedId: null` também cria um item raiz:
 
 ```bash
-curl -X POST "$API" \
-  -H 'Content-Type: application/json' \
-  -d '{"name": "Celulares", "relatedId": null}'
-# 201 {"id":"01a1a8f3-b8d0-72d6-aea1-4afc438aa28a"}
+curl -X POST "$API" -H 'Content-Type: application/json' -d '{"name": "Celulares", "relatedId": null}'
+```
+
+```text
+201 {"id":"01a1a8f3-b8d0-72d6-aea1-4afc438aa28a"}
 ```
 
 Espaços nas pontas são removidos e espaços repetidos viram um só. Este item é salvo como `"Ar Condicionado"`:
 
 ```bash
-curl -X POST "$API" \
-  -H 'Content-Type: application/json' \
-  -d '{"name": "  Ar   Condicionado  "}'
-# 201 {"id":"01a1a8f3-b8de-776b-9eed-f72858e9c174"}
+curl -X POST "$API" -H 'Content-Type: application/json' -d '{"name": "  Ar   Condicionado  "}'
+```
+
+```text
+201 {"id":"01a1a8f3-b8de-776b-9eed-f72858e9c174"}
 ```
 
 ### Erros ao criar
@@ -365,72 +361,101 @@ curl -X POST "$API" \
 Nome que já existe. A comparação é feita depois de normalizar os espaços, então `" Informática "` conflita com `"Informática"`:
 
 ```bash
-curl -X POST "$API" \
-  -H 'Content-Type: application/json' \
-  -d '{"name": " Informática "}'
-# 409 {"error":{"code":"MENU_ITEM_NAME_ALREADY_IN_USE","message":"Já existe um item de menu com o nome \"Informática\""}}
+curl -X POST "$API" -H 'Content-Type: application/json' -d '{"name": " Informática "}'
 ```
 
-Nome ausente ou que não é texto:
+```text
+409 {"error":{"code":"MENU_ITEM_NAME_ALREADY_IN_USE","message":"Já existe um item de menu com o nome \"Informática\""}}
+```
+
+Nome ausente:
 
 ```bash
 curl -X POST "$API" -H 'Content-Type: application/json' -d '{}'
-# 400 {"error":{"code":"INVALID_MENU_ITEM_NAME","message":"O nome do item de menu deve ser um texto"}}
+```
 
+```text
+400 {"error":{"code":"INVALID_MENU_ITEM_NAME","message":"O nome do item de menu deve ser um texto"}}
+```
+
+Nome que não é texto:
+
+```bash
 curl -X POST "$API" -H 'Content-Type: application/json' -d '{"name": 123}'
-# 400 {"error":{"code":"INVALID_MENU_ITEM_NAME","message":"O nome do item de menu deve ser um texto"}}
+```
+
+```text
+400 {"error":{"code":"INVALID_MENU_ITEM_NAME","message":"O nome do item de menu deve ser um texto"}}
 ```
 
 Nome vazio ou só com espaços:
 
 ```bash
 curl -X POST "$API" -H 'Content-Type: application/json' -d '{"name": "   "}'
-# 400 {"error":{"code":"INVALID_MENU_ITEM_NAME","message":"O nome do item de menu é obrigatório"}}
 ```
 
-Nome com mais de 100 caracteres:
+```text
+400 {"error":{"code":"INVALID_MENU_ITEM_NAME","message":"O nome do item de menu é obrigatório"}}
+```
+
+Nome com mais de 100 caracteres (aqui, 101 letras "a"):
 
 ```bash
-curl -X POST "$API" -H 'Content-Type: application/json' \
-  -d "{\"name\": \"$(printf 'a%.0s' {1..101})\"}"
-# 400 {"error":{"code":"INVALID_MENU_ITEM_NAME","message":"O nome do item de menu deve ter no máximo 100 caracteres"}}
+curl -X POST "$API" -H 'Content-Type: application/json' -d '{"name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+```
+
+```text
+400 {"error":{"code":"INVALID_MENU_ITEM_NAME","message":"O nome do item de menu deve ter no máximo 100 caracteres"}}
 ```
 
 `relatedId` que não é um UUID, como o número do enunciado original:
 
 ```bash
 curl -X POST "$API" -H 'Content-Type: application/json' -d '{"name": "Plasma", "relatedId": 1}'
-# 400 {"error":{"code":"INVALID_MENU_ITEM_ID","message":"\"1\" não é um id de item de menu válido"}}
+```
+
+```text
+400 {"error":{"code":"INVALID_MENU_ITEM_ID","message":"\"1\" não é um id de item de menu válido"}}
 ```
 
 `relatedId` válido, mas de um item que não existe:
 
 ```bash
-curl -X POST "$API" -H 'Content-Type: application/json' \
-  -d '{"name": "Plasma", "relatedId": "0192f3a4-1b2c-7d3e-8f40-123456789abc"}'
-# 404 {"error":{"code":"PARENT_MENU_ITEM_NOT_FOUND","message":"Item de menu pai \"0192f3a4-1b2c-7d3e-8f40-123456789abc\" não encontrado"}}
+curl -X POST "$API" -H 'Content-Type: application/json' -d '{"name": "Plasma", "relatedId": "0192f3a4-1b2c-7d3e-8f40-123456789abc"}'
+```
+
+```text
+404 {"error":{"code":"PARENT_MENU_ITEM_NOT_FOUND","message":"Item de menu pai \"0192f3a4-1b2c-7d3e-8f40-123456789abc\" não encontrado"}}
 ```
 
 JSON malformado:
 
 ```bash
 curl -X POST "$API" -H 'Content-Type: application/json' -d '{"name": '
-# 400 {"error":{"code":"ENTITY_PARSE_FAILED","message":"Unexpected end of JSON input"}}
 ```
 
-Corpo acima de 10 KB:
+```text
+400 {"error":{"code":"ENTITY_PARSE_FAILED","message":"Unexpected end of JSON input"}}
+```
+
+Corpo acima de 10 KB. Rodando na raiz do projeto, o próprio `package-lock.json` (cerca de 270 KB) serve de corpo:
 
 ```bash
-curl -X POST "$API" -H 'Content-Type: application/json' \
-  -d "{\"name\": \"$(head -c 11000 /dev/zero | tr '\0' 'a')\"}"
-# 413 {"error":{"code":"ENTITY_TOO_LARGE","message":"request entity too large"}}
+curl -X POST "$API" -H 'Content-Type: application/json' --data-binary @package-lock.json
+```
+
+```text
+413 {"error":{"code":"ENTITY_TOO_LARGE","message":"request entity too large"}}
 ```
 
 Sem o cabeçalho `Content-Type: application/json`, o corpo não é lido e o nome chega vazio:
 
 ```bash
 curl -X POST "$API" -d '{"name": "Plasma"}'
-# 400 {"error":{"code":"INVALID_MENU_ITEM_NAME","message":"O nome do item de menu deve ser um texto"}}
+```
+
+```text
+400 {"error":{"code":"INVALID_MENU_ITEM_NAME","message":"O nome do item de menu deve ser um texto"}}
 ```
 
 ### Consultar o menu
@@ -439,7 +464,10 @@ Menu completo:
 
 ```bash
 curl "$API"
-# 200 [{"id":"…","name":"Eletrodomésticos","submenus":[…]},{"id":"…","name":"Informática","submenus":[…]}]
+```
+
+```text
+200 [{"id":"…","name":"Eletrodomésticos","submenus":[…]},{"id":"…","name":"Informática","submenus":[…]}, …]
 ```
 
 Formatado:
@@ -448,67 +476,104 @@ Formatado:
 curl -s "$API" | jq
 ```
 
-Só os cabeçalhos de cache:
+Só os cabeçalhos (`-I` faz uma requisição HEAD):
 
 ```bash
-curl -s -D - -o /dev/null "$API"
-# HTTP/1.1 200 OK
-# Cache-Control: no-cache
-# Content-Type: application/json; charset=utf-8
-# ETag: "OYG6bUThTfSnp_n57fN_v9n3T24"
-# Vary: Accept-Encoding
-# ...
+curl -I "$API"
 ```
 
-Com compressão gzip (o `--compressed` pede gzip e descompacta a resposta):
-
-```bash
-curl -s --compressed -D - -o /dev/null "$API" | grep -i content-encoding
-# Content-Encoding: gzip
+```text
+HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+Cache-Control: no-cache
+ETag: "cYtu8ZWiTa1M8xBfp1TBRxqRZKQ"
+Vary: Accept-Encoding
+X-Upstream-Addr: 172.21.0.5:3000
+...
 ```
 
-Revalidação com ETag. Se o menu não mudou, a resposta é `304` sem corpo:
+Com compressão gzip:
 
 ```bash
-ETAG=$(curl -s -D - -o /dev/null "$API" | awk 'tolower($1)=="etag:" {print $2}' | tr -d '\r')
-curl -s -o /dev/null -w '%{http_code}\n' -H "If-None-Match: $ETAG" "$API"
-# 304
+curl -I -H 'Accept-Encoding: gzip' "$API"
+```
+
+```text
+HTTP/1.1 200 OK
+Content-Encoding: gzip
+...
+```
+
+Revalidação com ETag. O primeiro comando guarda o ETag no arquivo `etag.txt`; o segundo o reenvia em `If-None-Match` e, se o menu não mudou, recebe `304` sem corpo:
+
+```bash
+curl -s -o /dev/null --etag-save etag.txt "$API"
+```
+
+```bash
+curl -i --etag-compare etag.txt "$API"
+```
+
+```text
+HTTP/1.1 304 Not Modified
 ```
 
 Depois de qualquer criação ou exclusão que mude o menu, o mesmo ETag passa a receber `200` com o menu novo.
 
 ### Excluir itens
 
-Excluir um item remove também todos os seus sub-itens. Usando o menu montado acima, excluir "Televisores" remove ele, "LCD", "110", "220" e "Plasma":
+Excluir um item remove também todos os seus sub-itens. Excluir "Televisores" remove ele, "LCD", "110", "220" e "Plasma":
 
 ```bash
 curl -X DELETE "$API/$TV"
-# 200 {"deletedCount":5}
+```
+
+```text
+200 {"deletedCount":5}
 ```
 
 Item que não existe, ou que já foi excluído:
 
 ```bash
 curl -X DELETE "$API/$TV"
-# 404 {"error":{"code":"MENU_ITEM_NOT_FOUND","message":"Item de menu \"01a1a8f3-f95c-758d-8d85-bf2f89220263\" não encontrado"}}
+```
+
+```text
+404 {"error":{"code":"MENU_ITEM_NOT_FOUND","message":"Item de menu \"01a1a8f3-f95c-758d-8d85-bf2f89220263\" não encontrado"}}
 ```
 
 Id que não é um UUID:
 
 ```bash
 curl -X DELETE "$API/abc"
-# 400 {"error":{"code":"INVALID_MENU_ITEM_ID","message":"\"abc\" não é um id de item de menu válido"}}
 ```
 
-Para limpar o menu inteiro, basta excluir as raízes. Seguindo todos os exemplos desta seção, sobram cinco raízes: "Eletrodomésticos" (com "Geladeiras"), "Informática" (com seus 5 sub-itens), "Linha Branca", "Celulares" e "Ar Condicionado":
+```text
+400 {"error":{"code":"INVALID_MENU_ITEM_ID","message":"\"abc\" não é um id de item de menu válido"}}
+```
+
+Excluir as raízes remove as árvores inteiras:
 
 ```bash
-for id in $(curl -s "$API" | jq -r '.[].id'); do curl -s -X DELETE "$API/$id"; echo; done
-# {"deletedCount":2}
-# {"deletedCount":6}
-# {"deletedCount":1}
-# {"deletedCount":1}
-# {"deletedCount":1}
+curl -X DELETE "$API/$ELETRO"
+```
+
+```text
+200 {"deletedCount":2}
+```
+
+```bash
+curl -X DELETE "$API/$INFO"
+```
+
+```text
+200 {"deletedCount":6}
+```
+
+"Eletrodomésticos" remove 2 itens porque, a essa altura, só restava "Geladeiras" embaixo dele. Os outros itens criados nos exemplos ("Linha Branca", "Celulares" e "Ar Condicionado") se excluem do mesmo jeito, pelo id devolvido na criação. Para apagar todo o menu de uma vez, derrube a stack junto com o volume do MongoDB:
+
+```bash
+docker compose down -v
 ```
 
 ### Outras rotas
@@ -517,14 +582,20 @@ Rota ou método inexistente:
 
 ```bash
 curl -X PUT "$API/$INFO"
-# 404 {"error":{"code":"ROUTE_NOT_FOUND","message":"Rota PUT /api/v1/menu/01a1a8f3-f9b0-73da-9131-3e5b7a2f47e1 não encontrada"}}
+```
+
+```text
+404 {"error":{"code":"ROUTE_NOT_FOUND","message":"Rota PUT /api/v1/menu/01a1a8f3-f9b0-73da-9131-3e5b7a2f47e1 não encontrada"}}
 ```
 
 Health check:
 
 ```bash
 curl http://localhost:3000/health
-# 200 {"status":"ok"}
+```
+
+```text
+200 {"status":"ok"}
 ```
 
 ## Arquitetura
