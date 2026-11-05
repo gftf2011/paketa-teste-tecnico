@@ -97,6 +97,24 @@ Os testes de integração do Redis Pub/Sub precisam de um Redis real e são pula
 REDIS_URL=redis://localhost:6379 npm test
 ```
 
+### Testes de arquitetura
+
+```bash
+npm run test:architecture
+```
+
+[src/architecture.spec.ts](src/architecture.spec.ts) usa o [ArchUnitTS](https://github.com/LukasNiessen/ArchUnitTS) para garantir que a arquitetura descrita aqui continue valendo conforme o código evolui. As regras valem para o código de produção. Specs, suítes de contrato e helpers de teste ficam de fora, porque cruzam camadas de propósito.
+
+| Grupo | Regras |
+|---|---|
+| Camadas | `domain` não depende de `application`, `infra` nem `main`; `application` não depende de `infra` nem `main`; `infra` não depende de `main` |
+| Composition root e kernel | Só `main` depende de `main`; `shared` não depende de `menu`; `shared/domain` não depende de `shared/application` nem `shared/infra` |
+| Ciclos | Nenhuma dependência circular no código de produção |
+| Frameworks | `domain` só importa código próprio e `uuid`; `application` não importa bibliotecas externas; `express`/`compression` só na camada HTTP e em `main`; `mongodb` só no repositório Mongo e em `main`; `ioredis` só no barramento de invalidação; o SDK do OpenTelemetry só em `main/telemetry.ts` (o resto usa apenas `@opentelemetry/api`); `process.env` só em `main` |
+| Convenções | Arquivos em kebab-case; cada caso de uso em `<nome>/<nome>.use-case.ts`; portas de repositório terminam em `-repository.ts`; arquivos de produção com menos de 250 linhas |
+
+Para garantir que as regras funcionam, criei temporariamente arquivos que violavam cada uma delas (o domínio importando a infra e o Express, um ciclo, um nome fora do padrão, entre outros). Todas as 18 regras reprovaram, apontando o arquivo responsável. Uma regra cujo caminho não encontra nenhum arquivo também reprova, então um caminho digitado errado não passa despercebido.
+
 ### Testes de carga (k6)
 
 O script [load-tests/menu.test.js](load-tests/menu.test.js) roda com o [k6](https://k6.io) dentro do Docker Compose, então não é preciso instalá-lo. Cada comando sobe a API e o MongoDB, se ainda não estiverem rodando, e executa o teste:
